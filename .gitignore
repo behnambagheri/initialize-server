@@ -1,0 +1,8 @@
+### Ansible template
+*.retry
+
+.idea
+
+hosts.ini
+
+sudo_pass.yaml
