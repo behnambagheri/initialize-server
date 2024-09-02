@@ -2,6 +2,7 @@
 - name: Configure servers
   hosts: all
   become: yes
+  gather_facts: yes  # Ensure facts are gathered
   vars_files:
     - sudo_pass.yaml
   vars:
@@ -10,21 +11,55 @@
     ssh_public_key_file: "{{ public_key }}"  # Update with the correct path
 
   tasks:
+    - name: Set ubuntu_release variable
+      set_fact:
+        ubuntu_release: "{{ ansible_facts['lsb']['codename'] }}"
+
     - name: Backup existing DNS configuration
       copy:
         src: /etc/resolv.conf
         dest: /etc/resolv.conf.backup
 
-    - name: Set custom DNS settings
-      copy:
-        content: |
-          nameserver 185.51.200.2
-          nameserver 178.22.122.100
-        dest: /etc/resolv.conf
-
     - name: Set hostname
       hostname:
         name: "{{ inventory_hostname }}"
+
+    - name: Add hostname to /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.1\.1\s+'
+        line: "127.0.1.1 {{ inventory_hostname }}"
+        state: present
+        create: yes
+
+    - name: Add ArvanCloud repository to APT sources list
+      lineinfile:
+        path: /etc/apt/sources.list
+        line: "deb http://mirror.arvancloud.ir/ubuntu {{ ubuntu_release }} universe"
+        state: present
+
+    - name: Install alert script
+      shell: |
+        git clone https://{{ github_token }}@github.com/behnambagheri/alert.git /root/alert &&
+        cd /root/alert &&
+        COMPANY="{{ company }}" TOPIC_ID="{{ topic_id }}" ./alert.sh init &&
+        rm -rf /root/alert &&
+        sleep 60
+      args:
+        executable: /bin/bash
+      become: yes
+      become_user: root
+
+    - name: Add APT proxy configuration
+      copy:
+        dest: /etc/apt/apt.conf.d/01proxy
+        content: |
+          Acquire::http::Proxy "socks5h://127.0.0.1:65285";
+          Acquire::https::Proxy "socks5h://127.0.0.1:65285";
+
+    - name: Update APT cache after adding new repository
+      apt:
+        update_cache: yes
 
     - name: Install packages
       apt:
@@ -52,6 +87,13 @@
           - prometheus-node-exporter
         state: present
         update_cache: yes
+
+    - name: Set custom DNS settings
+      copy:
+        content: |
+          nameserver 185.51.200.2
+          nameserver 178.22.122.100
+        dest: /etc/resolv.conf
 
     - name: Install Docker prerequisites
       apt:
@@ -94,11 +136,32 @@
         state: present
         update_cache: yes
 
+    - name: Remove APT proxy configuration
+      file:
+        path: /etc/apt/apt.conf.d/01proxy
+        state: absent
+
+    - name: Configure Docker daemon
+      copy:
+        dest: /etc/docker/daemon.json
+        content: |
+          {
+            "insecure-registries" : ["https://docker.arvancloud.ir"],
+            "registry-mirrors": ["https://docker.arvancloud.ir"]
+          }
+        mode: '0644'
+
     - name: Enable and start Docker service
       systemd:
         name: docker
         enabled: yes
         state: started
+
+    - name: Restore original DNS configuration
+      copy:
+        src: /etc/resolv.conf.backup
+        dest: /etc/resolv.conf
+        remote_src: yes
 
     - name: Add group ssh_users
       group:
@@ -112,7 +175,7 @@
         shell: /bin/bash
         append: yes
 
-    - name: add "{{ ansible_user }}" to ssh_users
+    - name: Add "{{ ansible_user }}" to ssh_users
       user:
         name: "{{ ansible_user }}"
         groups: ssh_users
@@ -151,9 +214,3 @@
       service:
         name: ssh
         state: restarted
-
-    - name: Restore original DNS configuration
-      copy:
-        src: /etc/resolv.conf.backup
-        dest: /etc/resolv.conf
-        remote_src: yes
