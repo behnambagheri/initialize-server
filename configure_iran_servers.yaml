@@ -1,0 +1,159 @@
+---
+- name: Configure servers
+  hosts: all
+  become: yes
+  vars_files:
+    - sudo_pass.yaml
+  vars:
+    new_username: "{{ username }}"
+    new_password: "{{ password }}"
+    ssh_public_key_file: "{{ public_key }}"  # Update with the correct path
+
+  tasks:
+    - name: Backup existing DNS configuration
+      copy:
+        src: /etc/resolv.conf
+        dest: /etc/resolv.conf.backup
+
+    - name: Set custom DNS settings
+      copy:
+        content: |
+          nameserver 185.51.200.2
+          nameserver 178.22.122.100
+        dest: /etc/resolv.conf
+
+    - name: Set hostname
+      hostname:
+        name: "{{ inventory_hostname }}"
+
+    - name: Install packages
+      apt:
+        name:
+          - jq
+          - curl
+          - wget
+          - vim
+          - git
+          - dnsutils
+          - bind9-host
+          - nmap
+          - iputils-ping
+          - rsync
+          - netcat-traditional
+          - gcc
+          - build-essential
+          - net-tools
+          - python3-full
+          - python3-pip
+          - python3-venv
+          - iproute2
+          - unzip
+          - bind9-*
+          - prometheus-node-exporter
+        state: present
+        update_cache: yes
+
+    - name: Install Docker prerequisites
+      apt:
+        name:
+          - ca-certificates
+          - curl
+        state: present
+        update_cache: yes
+
+    - name: Create Docker apt keyrings directory
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Add Docker's official GPG key
+      get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+
+    - name: Set permissions for Docker GPG key
+      file:
+        path: /etc/apt/keyrings/docker.asc
+        mode: '0644'
+
+    - name: Add Docker repository
+      shell: |
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+      args:
+        executable: /bin/bash
+
+    - name: Update apt and install Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+        update_cache: yes
+
+    - name: Enable and start Docker service
+      systemd:
+        name: docker
+        enabled: yes
+        state: started
+
+    - name: Add group ssh_users
+      group:
+        name: ssh_users
+
+    - name: Create a new user
+      user:
+        name: "{{ new_username }}"
+        password: "{{ new_password | password_hash('sha512') }}"
+        groups: sudo,ssh_users,docker,adm
+        shell: /bin/bash
+        append: yes
+
+    - name: add "{{ ansible_user }}" to ssh_users
+      user:
+        name: "{{ ansible_user }}"
+        groups: ssh_users
+        append: yes
+
+    - name: Read SSH public key from file
+      set_fact:
+        ssh_public_key: "{{ lookup('file', ssh_public_key_file) }}"
+
+    - name: Add SSH key for new user
+      authorized_key:
+        user: "{{ new_username }}"
+        key: "{{ ssh_public_key }}"
+
+    - name: Replace sshd_config content
+      copy:
+        content: |
+          Include /etc/ssh/sshd_config.d/*.conf
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          UsePAM yes
+          X11Forwarding yes
+          PrintMotd no
+          AcceptEnv LANG LC_*
+          Subsystem sftp /usr/lib/openssh/sftp-server
+          AllowGroups ssh_users
+          MaxAuthTries 6
+          MaxSessions 10
+          PubkeyAuthentication yes
+          PermitRootLogin no
+          ClientAliveInterval 120
+          ClientAliveCountMax 6
+        dest: /etc/ssh/sshd_config
+
+    - name: Restart sshd service
+      service:
+        name: ssh
+        state: restarted
+
+    - name: Restore original DNS configuration
+      copy:
+        src: /etc/resolv.conf.backup
+        dest: /etc/resolv.conf
+        remote_src: yes
