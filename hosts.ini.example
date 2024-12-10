@@ -1,8 +1,7 @@
 [all]
-server1 ansible_host=192.168.1.1 ansible_user=your_user ansible_ssh_pass=your_pass ansible_ssh_private_key_file=/path/to/private/key
-server2 ansible_host=192.168.1.2 ansible_user=your_user ansible_ssh_pass=your_pass ansible_ssh_private_key_file=/path/to/private/key
-server3 ansible_host=192.168.1.3 ansible_user=your_user ansible_ssh_pass=your_pass ansible_ssh_private_key_file=/path/to/private/key
+janus1-alfaexpo ansible_host=5.34.193.190 ansible_user=ubuntu ansible_ssh_pass=15J8n9Tbb9c2JqUvCP ansible_ssh_common_args='-o StrictHostKeyChecking=no' ansible_python_interpreter=/usr/bin/python3 server_name="janus1alfanova.co"
+janus-backup1-alfaexpo ansible_host=37.152.181.179 ansible_user=ubuntu ansible_ssh_pass=15J8n9Tbb9c2JqUvCP ansible_ssh_common_args='-o StrictHostKeyChecking=no' ansible_python_interpreter=/usr/bin/python3 server_name="janus-backup1.alfanova.co"
 
 [all:vars]
-username=bea
-password=password
+cloudflare_api_token="***"
+certbot_domains="alfa.rest, *.alfa.rest, alfanova.co, *.alfanova.co"
